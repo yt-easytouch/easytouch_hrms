@@ -9,6 +9,9 @@ from frappe.query_builder.functions import Sum
 from frappe.utils import cstr, flt, get_link_to_form
 
 import erpnext
+from erpnext.accounts.doctype.repost_accounting_ledger.repost_accounting_ledger import (
+	validate_docs_for_voucher_types,
+)
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 from erpnext.accounts.general_ledger import make_gl_entries
 from erpnext.controllers.accounts_controller import AccountsController
@@ -23,6 +26,10 @@ class InvalidExpenseApproverError(frappe.ValidationError):
 
 
 class ExpenseApproverIdentityError(frappe.ValidationError):
+	pass
+
+
+class MismatchError(frappe.ValidationError):
 	pass
 
 
@@ -44,6 +51,7 @@ class ExpenseClaim(AccountsController, PWANotificationsMixin):
 		self.set_expense_account(validate=True)
 		self.calculate_taxes()
 		self.set_status()
+		self.validate_company_and_department()
 		if self.task and not self.project:
 			self.project = frappe.db.get_value("Task", self.task, "project")
 
@@ -80,6 +88,15 @@ class ExpenseClaim(AccountsController, PWANotificationsMixin):
 		else:
 			self.status = status
 
+	def validate_company_and_department(self):
+		if self.department:
+			company = frappe.db.get_value("Department", self.department, "company")
+			if company and self.company != company:
+				frappe.throw(
+					_("Department {0} does not belong to company: {1}").format(self.department, self.company),
+					exc=MismatchError,
+				)
+
 	def on_update(self):
 		share_doc_with_approver(self, self.expense_approver)
 		self.publish_update()
@@ -106,6 +123,11 @@ class ExpenseClaim(AccountsController, PWANotificationsMixin):
 		update_reimbursed_amount(self)
 
 		self.update_claimed_amount_in_employee_advance()
+
+	def on_update_after_submit(self):
+		if self.check_if_fields_updated([], {"taxes": ("account_head")}):
+			validate_docs_for_voucher_types(["Expense Claim"])
+			self.repost_accounting_entries()
 
 	def on_cancel(self):
 		self.update_task_and_project()

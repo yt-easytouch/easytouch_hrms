@@ -2,7 +2,6 @@
 # License: GNU General Public License v3. See license.txt
 
 
-import ast
 import unicodedata
 from datetime import date
 
@@ -21,6 +20,7 @@ from frappe.utils import (
 	flt,
 	formatdate,
 	get_first_day,
+	get_last_day,
 	get_link_to_form,
 	getdate,
 	money_in_words,
@@ -74,6 +74,8 @@ class SalarySlip(TransactionBase):
 			"rounded": rounded,
 			"date": date,
 			"getdate": getdate,
+			"get_first_day": get_first_day,
+			"get_last_day": get_last_day,
 			"ceil": ceil,
 			"floor": floor,
 		}
@@ -139,7 +141,7 @@ class SalarySlip(TransactionBase):
 		self.validate_dates()
 		self.check_existing()
 
-		if not self.salary_slip_based_on_timesheet:
+		if self.payroll_frequency:
 			self.get_date_details()
 
 		if not (len(self.get("earnings")) or len(self.get("deductions"))):
@@ -319,7 +321,7 @@ class SalarySlip(TransactionBase):
 			self.set("earnings", [])
 			self.set("deductions", [])
 
-			if not self.salary_slip_based_on_timesheet:
+			if self.payroll_frequency:
 				self.get_date_details()
 
 			self.validate_dates()
@@ -765,7 +767,7 @@ class SalarySlip(TransactionBase):
 				)
 			)
 
-	def calculate_net_pay(self):
+	def calculate_net_pay(self, skip_tax_breakup_computation: bool = False):
 		def set_gross_pay_and_base_gross_pay():
 			self.gross_pay = self.get_component_totals("earnings", depends_on_payment_days=1)
 			self.base_gross_pay = flt(
@@ -792,32 +794,12 @@ class SalarySlip(TransactionBase):
 		if self.salary_structure:
 			self.calculate_component_amounts("deductions")
 
-			deduction_abbrs = [d.abbr for d in self.deductions]
-			self.update_dependent_components_recursively("earnings", deduction_abbrs)
-
-		set_gross_pay_and_base_gross_pay()
-		self.update_dependent_components_recursively("deductions", ["gross_pay", "base_gross_pay"])
-
 		set_loan_repayment(self)
 
 		self.set_precision_for_component_amounts()
 		self.set_net_pay()
-		self.compute_income_tax_breakup()
-
-	def update_dependent_components_recursively(
-		self, component_type: str, updated_var: str | list[str]
-	) -> None:
-		def is_var_updated(var: str | list[str]) -> bool:
-			return var == updated_var if isinstance(updated_var, str) else var in updated_var
-
-		other_component_type = "deductions" if component_type == "earnings" else "earnings"
-
-		for d in self._salary_structure_doc.get(component_type):
-			if d.amount_based_on_formula and d.formula:
-				for var in get_variables_from_formula(d.formula):
-					if is_var_updated(var):
-						self.add_structure_component(d, component_type)
-						self.update_dependent_components_recursively(other_component_type, d.abbr)
+		if not skip_tax_breakup_computation:
+			self.compute_income_tax_breakup()
 
 	def set_net_pay(self):
 		self.total_deduction = self.get_component_totals("deductions")
@@ -985,10 +967,7 @@ class SalarySlip(TransactionBase):
 			non_taxable_additional_salary,
 		) = self.get_non_taxable_earnings_for_current_period()
 
-		# Future period non taxable earnings
-		future_period_non_taxable_earnings = current_period_non_taxable_earnings * (
-			ceil(self.remaining_sub_periods) - 1
-		)
+		future_period_non_taxable_earnings = self.get_future_period_non_taxable_earnings()
 
 		non_taxable_earnings = (
 			prev_period_non_taxable_earnings
@@ -998,6 +977,19 @@ class SalarySlip(TransactionBase):
 		)
 
 		return non_taxable_earnings
+
+	def get_future_period_non_taxable_earnings(self):
+		salary_slip = frappe.copy_doc(self)
+		# consider full payment days for future period
+		salary_slip.payment_days = salary_slip.total_working_days
+		salary_slip.calculate_net_pay(skip_tax_breakup_computation=True)
+
+		future_period_non_taxable_earnings = 0
+		for earning in salary_slip.earnings:
+			if not earning.is_tax_applicable and not earning.additional_salary:
+				future_period_non_taxable_earnings += earning.amount
+
+		return future_period_non_taxable_earnings * (ceil(self.remaining_sub_periods) - 1)
 
 	def get_non_taxable_earnings_for_current_period(self):
 		current_period_non_taxable_earnings = 0.0
@@ -1686,7 +1678,7 @@ class SalarySlip(TransactionBase):
 
 					taxable_earnings -= flt(amount - additional_amount)
 					additional_income -= additional_amount
-					amount_exempted_from_income_tax = flt(amount - additional_amount)
+					amount_exempted_from_income_tax += flt(amount - additional_amount)
 
 					if additional_amount and ded.is_recurring_additional_salary:
 						additional_income -= self.get_future_recurring_additional_amount(
@@ -1921,7 +1913,7 @@ class SalarySlip(TransactionBase):
 
 	def process_salary_structure(self, for_preview=0):
 		"""Calculate salary after salary structure details have been updated"""
-		if not self.salary_slip_based_on_timesheet:
+		if self.payroll_frequency:
 			self.get_date_details()
 		self.pull_emp_details()
 		self.get_working_days_details(for_preview=for_preview)
@@ -2077,7 +2069,7 @@ class SalarySlip(TransactionBase):
 		if frappe.db.get_single_value("Payroll Settings", "show_leave_balances_in_salary_slip"):
 			from hrms.hr.doctype.leave_application.leave_application import get_leave_details
 
-			leave_details = get_leave_details(self.employee, self.end_date)
+			leave_details = get_leave_details(self.employee, self.end_date, True)
 
 			for leave_type, leave_values in leave_details["leave_allocation"].items():
 				self.append(
@@ -2180,6 +2172,8 @@ def eval_tax_slab_condition(condition, eval_globals=None, eval_locals=None):
 			"round": round,
 			"date": date,
 			"getdate": getdate,
+			"get_first_day": get_first_day,
+			"get_last_day": get_last_day,
 		}
 
 	try:
@@ -2308,6 +2302,8 @@ def _safe_eval(code: str, eval_globals: dict | None = None, eval_locals: dict | 
 
 
 def _check_attributes(code: str) -> None:
+	import ast
+
 	from frappe.utils.safe_exec import UNSAFE_ATTRIBUTES
 
 	unsafe_attrs = set(UNSAFE_ATTRIBUTES).union(["__"]) - {"format"}
@@ -2346,9 +2342,3 @@ def email_salary_slips(names) -> None:
 	for name in names:
 		salary_slip = frappe.get_doc("Salary Slip", name)
 		salary_slip.email_salary_slip()
-
-
-def get_variables_from_formula(formula: str) -> list[str]:
-	# compile expects a string
-	formula = cstr(formula)
-	return [node.id for node in ast.walk(ast.parse(formula, mode="eval")) if isinstance(node, ast.Name)]
