@@ -339,7 +339,7 @@ class ExpenseClaim(AccountsController, PWANotificationsMixin):
 			ref_doc = frappe.db.get_value(
 				"Employee Advance",
 				d.employee_advance,
-				["posting_date", "paid_amount", "claimed_amount", "advance_account"],
+				["posting_date", "paid_amount", "claimed_amount", "return_amount", "advance_account"],
 				as_dict=1,
 			)
 			d.posting_date = ref_doc.posting_date
@@ -347,7 +347,9 @@ class ExpenseClaim(AccountsController, PWANotificationsMixin):
 			d.advance_paid = ref_doc.paid_amount
 			d.unclaimed_amount = flt(ref_doc.paid_amount) - flt(ref_doc.claimed_amount)
 
-			if d.allocated_amount and flt(d.allocated_amount) > flt(d.unclaimed_amount):
+			if d.allocated_amount and flt(d.allocated_amount) > (
+				flt(d.unclaimed_amount) - flt(d.return_amount)
+			):
 				frappe.throw(
 					_("Row {0}# Allocated amount {1} cannot be greater than unclaimed amount {2}").format(
 						d.idx, d.allocated_amount, d.unclaimed_amount
@@ -410,6 +412,8 @@ def get_total_reimbursed_amount(doc):
 
 
 def get_outstanding_amount_for_claim(claim):
+	precision = frappe.get_precision("Expense Claim", "grand_total")
+
 	if isinstance(claim, str):
 		claim = frappe.db.get_value(
 			"Expense Claim",
@@ -430,7 +434,7 @@ def get_outstanding_amount_for_claim(claim):
 		- flt(claim.total_advance_amount)
 	)
 
-	return outstanding_amt
+	return flt(outstanding_amt, precision)
 
 
 @frappe.whitelist()
@@ -511,6 +515,7 @@ def get_advances(employee, advance_id=None):
 		advance.posting_date,
 		advance.paid_amount,
 		advance.claimed_amount,
+		advance.return_amount,
 		advance.advance_account,
 	)
 
@@ -529,7 +534,7 @@ def get_advances(employee, advance_id=None):
 
 @frappe.whitelist()
 def get_expense_claim(
-	employee_name, company, employee_advance_name, posting_date, paid_amount, claimed_amount
+	employee_name, company, employee_advance_name, posting_date, paid_amount, claimed_amount, return_amount
 ):
 	default_payable_account = frappe.get_cached_value(
 		"Company", company, "default_expense_claim_payable_account"
@@ -549,7 +554,10 @@ def get_expense_claim(
 			"posting_date": posting_date,
 			"advance_paid": flt(paid_amount),
 			"unclaimed_amount": flt(paid_amount) - flt(claimed_amount),
-			"allocated_amount": flt(paid_amount) - flt(claimed_amount),
+			"allocated_amount": get_allocation_amount(
+				paid_amount=(paid_amount), claimed_amount=(claimed_amount), return_amount=(return_amount)
+			),
+			"return_amount": flt(return_amount),
 		},
 	)
 
@@ -606,3 +614,13 @@ def make_expense_claim_for_delivery_trip(source_name, target_doc=None):
 	)
 
 	return doc
+
+
+@frappe.whitelist()
+def get_allocation_amount(paid_amount=None, claimed_amount=None, return_amount=None, unclaimed_amount=None):
+	if unclaimed_amount is not None and return_amount is not None:
+		return flt(unclaimed_amount) - flt(return_amount)
+	elif paid_amount is not None and claimed_amount is not None and return_amount is not None:
+		return flt(paid_amount) - (flt(claimed_amount) + flt(return_amount))
+	else:
+		frappe.throw(_("Invalid parameters provided. Please pass the required arguments."))

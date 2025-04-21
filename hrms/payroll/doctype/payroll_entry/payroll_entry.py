@@ -710,7 +710,9 @@ class PayrollEntry(Document):
 			}
 			"""
 			for employee, employee_details in self.employee_based_payroll_payable_entries.items():
-				payable_amount = employee_details.get("earnings", 0) - employee_details.get("deductions", 0)
+				payable_amount = (employee_details.get("earnings", 0) or 0) - (
+					employee_details.get("deductions", 0) or 0
+				)
 
 				payable_amount = self.get_accounting_entries_and_payable_amount(
 					payroll_payable_account,
@@ -1016,10 +1018,13 @@ class PayrollEntry(Document):
 		if self.employee_based_payroll_payable_entries:
 			for employee, employee_details in self.employee_based_payroll_payable_entries.items():
 				je_payment_amount = (
-					employee_details.get("earnings", 0)
-					- employee_details.get("deductions", 0)
-					- employee_details.get("total_loan_repayment", 0)
+					(employee_details.get("earnings", 0) or 0)
+					- (employee_details.get("deductions", 0) or 0)
+					- (employee_details.get("total_loan_repayment", 0) or 0)
 				)
+
+				if not je_payment_amount:
+					continue
 
 				exchange_rate, amount = self.get_amount_and_exchange_rate_for_journal_entry(
 					self.payment_account, je_payment_amount, company_currency, currencies
