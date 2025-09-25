@@ -159,7 +159,10 @@ override_doctype_class = {
 
 doc_events = {
 	"User": {
-		"validate": "erpnext.setup.doctype.employee.employee.validate_employee_role",
+		"validate": [
+			"erpnext.setup.doctype.employee.employee.validate_employee_role",
+			"hrms.overrides.employee_master.update_approver_user_roles",
+		],
 		"on_update": "erpnext.setup.doctype.employee.employee.update_user_permissions",
 	},
 	"Company": {
@@ -272,6 +275,7 @@ regional_overrides = {
 	"India": {
 		"hrms.hr.utils.calculate_annual_eligible_hra_exemption": "hrms.regional.india.utils.calculate_annual_eligible_hra_exemption",
 		"hrms.hr.utils.calculate_hra_exemption_for_period": "hrms.regional.india.utils.calculate_hra_exemption_for_period",
+		"hrms.hr.utils.calculate_tax_with_marginal_relief": "hrms.regional.india.utils.calculate_tax_with_marginal_relief",
 	},
 }
 
