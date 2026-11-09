@@ -1,12 +1,55 @@
 <template>
 	<div class="flex items-center">
 		<!-- Month Change -->
-		<div class="flex items-center bg-gray-50 rounded-md space-x-0.5">
+		<div v-if="!props.rangeFrom || !props.rangeTo" class="flex items-center bg-gray-50 rounded-md space-x-0.5">
 			<Button icon="chevron-left" variant="ghost" @click="emit('addToMonth', -1)" />
 			<span class="w-32 text-center font-medium text-base">
 				{{ props.firstOfMonth.format("MMMM") }}, {{ firstOfMonth.format("YYYY") }}
 			</span>
 			<Button icon="chevron-right" variant="ghost" @click="emit('addToMonth', 1)" />
+		</div>
+
+		<!-- Custom date range (replaces the month while both are set) -->
+		<div v-if="props.showRange" class="ml-2.5 flex items-center space-x-1.5" title="Custom date range">
+			<span class="text-xs text-gray-500 uppercase tracking-wide">Range</span>
+			<div class="w-36">
+				<FormControl
+					type="date"
+					:modelValue="props.rangeFrom"
+					placeholder="From"
+					@update:modelValue="(v: string) => emit('updateRange', { from: v || '', to: props.rangeTo })"
+				/>
+			</div>
+			<span class="text-gray-500 text-sm">→</span>
+			<div class="w-36">
+				<FormControl
+					type="date"
+					:modelValue="props.rangeTo"
+					placeholder="To"
+					:min="props.rangeFrom"
+					@update:modelValue="(v: string) => emit('updateRange', { from: props.rangeFrom, to: v || '' })"
+				/>
+			</div>
+			<Button
+				v-if="props.rangeFrom || props.rangeTo"
+				icon="x"
+				variant="ghost"
+				title="Back to month"
+				@click="emit('updateRange', { from: '', to: '' })"
+			/>
+		</div>
+
+		<!-- Day filter: one weekday (e.g. every Friday) or a single date -->
+		<div v-if="props.showDayFilter" class="ml-2.5 flex items-center space-x-1.5" title="Which days to show">
+			<span class="text-xs text-gray-500 uppercase tracking-wide">Show</span>
+			<div class="w-44">
+			<FormControl
+				type="select"
+				:options="dayOptions"
+				:modelValue="props.dayFilter"
+				@update:modelValue="(v: string) => emit('updateDay', v)"
+			/>
+			</div>
 		</div>
 
 		<!-- Filters -->
@@ -42,10 +85,17 @@ export type FilterField =
 
 const props = defineProps<{
 	firstOfMonth: Dayjs;
+	dayFilter: string;
+	rangeFrom: string;
+	rangeTo: string;
+	showRange?: boolean;
+	showDayFilter?: boolean;
 }>();
 
 const emit = defineEmits<{
 	(e: "addToMonth", change: number): void;
+	(e: "updateDay", value: string): void;
+	(e: "updateRange", value: { from: string; to: string }): void;
 	(e: "updateFilters", newFilters: { [K in FilterField]: string }): void;
 }>();
 
@@ -85,6 +135,18 @@ watch(filters, (val) => {
 	};
 	emit("updateFilters", newFilters);
 });
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+const dayOptions = computed(() => [
+	{ label: "All days", value: "" },
+	{ label: "Weekly pattern (Mon–Sun)", value: "week" },
+	...WEEKDAYS.map((label, idx) => ({ label: `Every ${label}`, value: `dow:${idx}` })),
+	...Array.from({ length: props.firstOfMonth.daysInMonth() }, (_, i) => {
+		const date = props.firstOfMonth.date(i + 1);
+		return { label: date.format("ddd DD MMM"), value: `date:${date.format("YYYY-MM-DD")}` };
+	}),
+]);
 
 const toTitleCase = (str: string) =>
 	str
