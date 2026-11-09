@@ -73,6 +73,7 @@
    "fieldtype": "Column Break"
   },
   {
+   "allow_on_submit": 1,
    "fetch_from": "grade.default_salary_structure",
    "fetch_if_empty": 1,
    "fieldname": "salary_structure",
@@ -85,6 +86,7 @@
    "search_index": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "from_date",
    "fieldtype": "Date",
    "label": "From Date",
@@ -104,6 +106,7 @@
    "label": "Base & Variable"
   },
   {
+   "allow_on_submit": 1,
    "fetch_from": "grade.default_base_pay",
    "fetch_if_empty": 1,
    "fieldname": "base",
@@ -116,6 +119,7 @@
    "fieldtype": "Column Break"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "variable",
    "fieldtype": "Currency",
    "label": "Variable",
@@ -131,6 +135,7 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "depends_on": "salary_structure",
    "fieldname": "income_tax_slab",
    "fieldtype": "Link",
@@ -149,6 +154,7 @@
    "reqd": 1
   },
   {
+   "allow_on_submit": 1,
    "depends_on": "employee",
    "fieldname": "payroll_payable_account",
    "fieldtype": "Link",
@@ -210,7 +216,7 @@
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2024-10-18 18:06:42.013701",
+ "modified": "2025-12-31 11:54:03.199090",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Salary Structure Assignment",
@@ -257,6 +263,8 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
  "search_fields": "employee_name, salary_structure",
  "sort_field": "modified",
  "sort_order": "DESC",

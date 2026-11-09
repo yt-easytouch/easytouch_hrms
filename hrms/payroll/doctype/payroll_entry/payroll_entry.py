@@ -373,7 +373,10 @@ class PayrollEntry(Document):
 				for cost_center, percentage in employee_cost_centers.items():
 					amount_against_cost_center = flt(item.amount) * percentage / 100
 
-					if employee_advance:
+					account = self.get_salary_component_account(item.salary_component)
+					account_type = frappe.get_cached_value("Account", account, "account_type")
+
+					if employee_advance or account_type in ("Receivable", "Payable"):
 						self.add_advance_deduction_entry(
 							item, amount_against_cost_center, cost_center, employee_advance
 						)
@@ -452,6 +455,7 @@ class PayrollEntry(Document):
 				precision,
 				entry_type="credit",
 				accounts=accounts,
+				party_type="Employee",
 				party=entry.get("employee"),
 				reference_type="Employee Advance",
 				reference_name=entry.get("reference_name"),
@@ -762,6 +766,7 @@ class PayrollEntry(Document):
 		accounting_dimensions,
 		precision,
 		entry_type="credit",
+		party_type=None,
 		party=None,
 		accounts=None,
 		reference_type=None,
@@ -778,6 +783,7 @@ class PayrollEntry(Document):
 			"cost_center": cost_center,
 			"project": self.project,
 		}
+
 
 		if entry_type == "debit":
 			payable_amount += flt(amount, precision)
@@ -805,7 +811,7 @@ class PayrollEntry(Document):
 		if party:
 			row.update(
 				{
-					"party_type": "Employee",
+					"party_type": party_type or "Employee",
 					"party": party,
 				}
 			)
@@ -911,7 +917,9 @@ class PayrollEntry(Document):
 				if only_tax_impact != 1 and statistical_component != 1:
 					if is_flexible_benefit == 1 and create_separate_je == 1:
 						self.set_accounting_entries_for_bank_entry(
-							salary_detail.amount, salary_detail.salary_component
+							salary_detail.amount,
+							salary_detail.salary_component,
+							employee_wise_accounting_enabled,
 						)
 					else:
 						if employee_wise_accounting_enabled:

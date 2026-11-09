@@ -145,6 +145,7 @@
    "precision": "2"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "earnings",
    "fieldtype": "Table",
    "label": "Earnings",
@@ -153,6 +154,7 @@
    "options": "Salary Detail"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "deductions",
    "fieldtype": "Table",
    "label": "Deductions",
@@ -171,6 +173,7 @@
    "width": "50%"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "total_earning",
    "fieldtype": "Currency",
    "hidden": 1,
@@ -179,6 +182,7 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "total_deduction",
    "fieldtype": "Currency",
    "hidden": 1,
@@ -187,6 +191,7 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "net_pay",
    "fieldtype": "Currency",
    "hidden": 1,
@@ -225,6 +230,7 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "conditions_and_formula_variable_and_example",
    "fieldtype": "HTML",
    "label": "Conditions and Formula variable and example"
@@ -242,7 +248,7 @@
  "idx": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2024-11-22 11:17:28.384386",
+ "modified": "2025-12-31 11:36:56.126348",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Salary Structure",
@@ -280,6 +286,8 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
  "show_name_in_global_search": 1,
  "sort_field": "modified",
  "sort_order": "DESC",

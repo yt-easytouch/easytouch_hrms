@@ -21,9 +21,20 @@
 						v-for="(day, idx) in daysOfMonth"
 						:key="idx"
 						class="font-medium border-b"
-						:class="{ 'border-l': idx }"
+						:class="{ 'border-l': idx, 'min-w-[22rem]': daysOfMonth.length === 1 }"
 					>
-						{{ day.dayName }} {{ dayjs(day.date).format("DD") }}
+						<button
+							v-if="isWeekly && props.allowWeekdayChange"
+							class="px-3 py-1 rounded hover:bg-gray-100"
+							:title="`Change every ${day.fullDayName}`"
+							@click="openWeekday(day)"
+						>
+							Every {{ day.fullDayName }}
+						</button>
+						<span v-else-if="isWeekly">Every {{ day.fullDayName }}</span>
+						<span v-else :title="day.fullDayName + ' ' + dayjs(day.date).format('DD MMM YYYY')">
+							{{ day.dayName }} {{ dayjs(day.date).format(hasRange ? "DD MMM" : "DD") }}
+						</span>
 					</th>
 				</tr>
 			</thead>
@@ -67,11 +78,11 @@
 						:class="{
 							'border-l': colIdx,
 							'border-t': rowIdx,
-							'align-top': events.data?.[employee.name]?.[day.date],
+							'align-top': cell(employee.name, day),
 							'align-middle bg-blue-50':
-								events.data?.[employee.name]?.[day.date]?.holiday,
+								cell(employee.name, day)?.holiday,
 							'align-middle bg-pink-50':
-								events.data?.[employee.name]?.[day.date]?.leave,
+								cell(employee.name, day)?.leave,
 							'bg-gray-50':
 								dropCell.employee === employee.name &&
 								dropCell.date === day.date &&
@@ -108,31 +119,25 @@
 						"
 					>
 						<!-- Holiday -->
-						<div
-							v-if="events.data?.[employee.name]?.[day.date]?.holiday"
-							class="blocked-cell"
-						>
+						<div v-if="cell(employee.name, day)?.holiday" class="blocked-cell">
 							<div
 								v-html="
-									events.data[employee.name][day.date].weekly_off
+									cell(employee.name, day).weekly_off
 										? '<strong>WO</strong>'
-										: events.data[employee.name][day.date].description
+										: cell(employee.name, day).description
 								"
 							></div>
 						</div>
 
 						<!-- Leave -->
-						<div
-							v-else-if="events.data?.[employee.name]?.[day.date]?.leave"
-							class="blocked-cell"
-						>
-							{{ events.data[employee.name][day.date].leave_type }}
+						<div v-else-if="cell(employee.name, day)?.leave" class="blocked-cell">
+							{{ cell(employee.name, day).leave_type }}
 						</div>
 
 						<!-- Shifts -->
 						<div v-else class="flex flex-col space-y-1.5 translate-x-0 translate-y-0">
 							<div
-								v-for="shift in events.data?.[employee.name]?.[day.date]"
+								v-for="shift in cell(employee.name, day)"
 								@mouseenter="
 									hoveredCell.shift = shift.name;
 									hoveredCell.shift_type = shift.shift_type;
@@ -184,14 +189,19 @@
 											: 'white',
 								}"
 								@click="
-									shiftAssignment = shift.name;
-									showShiftAssignmentDialog = true;
+									isWeekly && props.allowWeekdayChange
+										? openWeekday(day, employee.name)
+										: ((shiftAssignment = shift.name),
+											(showShiftAssignmentDialog = true))
 								"
 							>
 								<div
 									class="truncate mb-1.5 pointer-events-none text-base font-medium"
 								>
 									{{ shift["shift_type"] }}
+									<span v-if="shift.count > 1" class="text-xs text-gray-500 font-normal">
+										× {{ shift.count }} days
+									</span>
 								</div>
 								<div class="text-xs text-gray-500 pointer-events-none space-y-1.5">
 									<div class="flex items-center space-x-1">
@@ -241,8 +251,9 @@
 										: 'invisible'
 								"
 								@click="
-									shiftAssignment = '';
-									showShiftAssignmentDialog = true;
+									isWeekly && props.allowWeekdayChange
+										? openWeekday(day, employee.name)
+										: ((shiftAssignment = ''), (showShiftAssignmentDialog = true))
 								"
 							/>
 						</div>
@@ -252,6 +263,16 @@
 		</table>
 	</div>
 
+	<WeekdayShiftDialog
+		v-model="weekdayDialog.show"
+		:weekday="weekdayDialog.weekday"
+		:weekdayName="weekdayDialog.name"
+		:employees="weekdayDialog.employee ? [weekdayDialog.employee] : visibleEmployees"
+		:employeeLabels="dialogEmployeeLabels"
+		:defaultFrom="hasRange ? props.rangeFrom : ''"
+		:defaultTo="hasRange ? props.rangeTo : ''"
+		@applied="events.fetch()"
+	/>
 	<ShiftAssignmentDialog
 		v-model="showShiftAssignmentDialog"
 		:isDialogOpen="showShiftAssignmentDialog"
@@ -274,6 +295,7 @@ import { Dayjs } from "dayjs";
 import { dayjs, raiseToast } from "../utils";
 import { EmployeeFilters, ShiftFilters } from "../views/MonthView.vue";
 import ShiftAssignmentDialog from "./ShiftAssignmentDialog.vue";
+import WeekdayShiftDialog from "./WeekdayShiftDialog.vue";
 
 interface Holiday {
 	holiday: string;
@@ -328,6 +350,13 @@ const props = defineProps<{
 	}[];
 	employeeFilters: { [K in keyof EmployeeFilters]?: string };
 	shiftFilters: { [K in keyof ShiftFilters]?: string };
+	// "" = every day, "dow:<0-6>" = that weekday only, "date:<YYYY-MM-DD>" = that date only
+	dayFilter?: string;
+	// Custom From/To range; when both are set it replaces the month
+	rangeFrom?: string;
+	rangeTo?: string;
+	// HR Settings → Roster: may a weekday header / tile open the weekday dialog
+	allowWeekdayChange?: boolean;
 }>();
 
 const loading = ref(true);
@@ -344,17 +373,68 @@ const hoveredCell = ref({
 });
 const dropCell = ref({ employee: "", date: "", shift: "" });
 
+const hasRange = computed(
+	() => !!props.rangeFrom && !!props.rangeTo && !dayjs(props.rangeTo).isBefore(props.rangeFrom),
+);
+const rangeStart = computed(() => (hasRange.value ? dayjs(props.rangeFrom) : props.firstOfMonth));
+const rangeEnd = computed(() =>
+	hasRange.value ? dayjs(props.rangeTo) : props.firstOfMonth.endOf("month").startOf("D"),
+);
+const rangeLength = computed(() => rangeEnd.value.diff(rangeStart.value, "day") + 1);
+
 const daysOfMonth = computed(() => {
 	const daysOfMonth = [];
-	for (let i = 1; i <= props.firstOfMonth.daysInMonth(); i++) {
-		const date = props.firstOfMonth.date(i);
+	for (let i = 0; i < rangeLength.value; i++) {
+		const date = rangeStart.value.add(i, "day");
 		daysOfMonth.push({
 			dayName: date.format("ddd"),
+			fullDayName: date.format("dddd"),
 			date: date.format("YYYY-MM-DD"),
 		});
 	}
+
+	if (props.dayFilter === "week") {
+		// One column per weekday, showing the next upcoming one (or the last of the month)
+		const start = dayjs().isAfter(rangeStart.value) ? dayjs().startOf("D") : rangeStart.value;
+		return [1, 2, 3, 4, 5, 6, 0].map((dow) => {
+			const matches = daysOfMonth.filter((d) => dayjs(d.date).day() === dow);
+			const pick =
+				matches.find((d) => !dayjs(d.date).isBefore(start)) || matches[matches.length - 1];
+			return { ...pick, weekday: (dow + 6) % 7 };
+		});
+	}
+
+	const [kind, value] = (props.dayFilter || "").split(":");
+	if (kind === "dow") return daysOfMonth.filter((d) => dayjs(d.date).day() === Number(value));
+	if (kind === "date") return daysOfMonth.filter((d) => d.date === value);
 	return daysOfMonth;
 });
+
+const isWeekly = computed(() => props.dayFilter === "week");
+const weekdayDialog = ref({ show: false, weekday: 0, name: "", employee: "" });
+
+// Everyone currently listed (respecting the employee search box)
+const visibleEmployees = computed(() =>
+	props.employees
+		.filter(
+			(e) =>
+				!employeeSearch.value?.length ||
+				employeeSearch.value.some((item) => item.value === e.name),
+		)
+		.map((e) => e.name),
+);
+
+const dialogEmployeeLabels = computed(() => {
+	const wanted = weekdayDialog.value.employee ? [weekdayDialog.value.employee] : visibleEmployees.value;
+	return props.employees
+		.filter((e) => wanted.includes(e.name))
+		.map((e) => `${e.employee_name} (${e.name})`);
+});
+
+// From a header: everyone listed. From a cell: just that employee.
+const openWeekday = (day: { weekday: number; fullDayName: string }, employee = "") => {
+	weekdayDialog.value = { show: true, weekday: day.weekday, name: day.fullDayName, employee };
+};
 
 const employeeSearchOptions = computed(() => {
 	return props.employees.map((employee: { name: string; employee_name: string }) => ({
@@ -364,7 +444,7 @@ const employeeSearchOptions = computed(() => {
 });
 
 watch(
-	() => [props.firstOfMonth, props.employeeFilters, props.shiftFilters],
+	() => [props.firstOfMonth, props.employeeFilters, props.shiftFilters, props.rangeFrom, props.rangeTo],
 	() => {
 		loading.value = true;
 		events.fetch();
@@ -375,6 +455,39 @@ watch(
 watch(loading, (val) => {
 	if (!val) dropCell.value = { employee: "", date: "", shift: "" };
 });
+
+// Weekly view: for each employee and weekday, every distinct shift across the whole range,
+// with how many days it covers (so "Fiid × 3" next to "Galab × 1" after a partial change).
+const weeklyCells = computed(() => {
+	const result: Record<string, Record<number, (Shift & { count: number })[]>> = {};
+	if (!isWeekly.value || !events.data) return result;
+
+	for (const employee of Object.keys(events.data)) {
+		result[employee] = {};
+		for (let i = 0; i < rangeLength.value; i++) {
+			const date = rangeStart.value.add(i, "day");
+			const weekday = (date.day() + 6) % 7;
+			const shifts = events.data[employee]?.[date.format("YYYY-MM-DD")];
+			if (!Array.isArray(shifts)) continue;
+
+			const bucket = (result[employee][weekday] ||= []);
+			for (const shift of shifts) {
+				// Same shift type + status is one shift here; an empty location is not a different shift
+				const found = bucket.find(
+					(b) => b.shift_type === shift.shift_type && b.status === shift.status,
+				);
+				if (found) found.count++;
+				else bucket.push({ ...shift, count: 1 });
+			}
+		}
+	}
+	return result;
+});
+
+const cell = (employee: string, day: { date: string; weekday?: number }) =>
+	isWeekly.value
+		? weeklyCells.value[employee]?.[day.weekday as number]
+		: events.data?.[employee]?.[day.date];
 
 const isHolidayOrLeave = (employee: string, day: string) =>
 	events.data?.[employee]?.[day]?.holiday || events.data?.[employee]?.[day]?.leave;
@@ -395,8 +508,8 @@ const events = createResource({
 	auto: true,
 	makeParams() {
 		return {
-			month_start: props.firstOfMonth.format("YYYY-MM-DD"),
-			month_end: props.firstOfMonth.endOf("month").format("YYYY-MM-DD"),
+			month_start: rangeStart.value.format("YYYY-MM-DD"),
+			month_end: rangeStart.value.add(rangeLength.value - 1, "day").format("YYYY-MM-DD"),
 			employee_filters: props.employeeFilters,
 			shift_filters: props.shiftFilters,
 		};
@@ -440,8 +553,8 @@ const swapShift = createResource({
 
 const mapEventsToDates = (data: Events, mappedEvents: MappedEvents, employee: string) => {
 	mappedEvents[employee] = {};
-	for (let d = 1; d <= props.firstOfMonth.daysInMonth(); d++) {
-		const date = props.firstOfMonth.date(d);
+	for (let d = 0; d < rangeLength.value; d++) {
+		const date = rangeStart.value.add(d, "day");
 		const key = date.format("YYYY-MM-DD");
 
 		for (const event of Object.values(data[employee])) {
